@@ -25,19 +25,18 @@ jobs:
           java-version: "17"
 
       - name: Cache Gradle
-        uses: burrunan/gradle-cache-action@v2
+        uses: burrunan/gradle-cache-action@v3
 
       - name: Build
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ORG_GRADLE_PROJECT_githubPackagesUsername: ${{ github.actor }}
+          ORG_GRADLE_PROJECT_githubPackagesPassword: ${{ secrets.GITHUB_TOKEN }}
         run: |
           chmod +x gradlew
-          ./gradlew apiDump build
+          ./gradlew :patches:buildAndroid
 
       - name: Check output
-        run: |
-          ls -la patches/build/libs
-          ls patches/build/libs/patches-*.rvp
+        run: ls -la patches/build/libs/patches-*.rvp
 
       - name: Create release
         env:
