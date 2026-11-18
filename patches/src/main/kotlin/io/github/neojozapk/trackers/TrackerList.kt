@@ -1,7 +1,7 @@
 package io.github.neojozapk.trackers
 
 import java.net.HttpURLConnection
-import java.net.URL
+import java.net.URI
 
 /** Exodus-style code signatures: 'a.b.|c.d.' alternatives, treated as regex. */
 internal class Signatures(mapping: Map<String, List<String>>) {
@@ -61,7 +61,7 @@ internal object TrackerList {
     }
 
     private fun download(): String {
-        val c = URL(URL_EXODUS).openConnection() as HttpURLConnection
+        val c = URI(URL_EXODUS).toURL().openConnection() as HttpURLConnection
         c.connectTimeout = 8000
         c.readTimeout = 20000
         c.setRequestProperty("User-Agent", "tracker-patches")

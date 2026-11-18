@@ -59,7 +59,7 @@ private fun Element.childElements(): List<Element> {
 
 /** Reads the manifest and logs it. Changes nothing. */
 val trackerReportManifestPatch = resourcePatch {
-    execute {
+    apply {
         Report.reset()
         val (sigs, src) = TrackerList.load()
         Report.sigs = sigs
@@ -67,12 +67,13 @@ val trackerReportManifestPatch = resourcePatch {
         document("AndroidManifest.xml").use { document ->
             val root = document.documentElement
             val pkg = root.getAttribute("package")
+            // apktool usually strips these from the decoded manifest -> null (the manager's log header has them).
             val vcRaw = root.getAttribute("android:versionCode")
             TprLog.emit(
                 "t" to "meta",
                 "pkg" to pkg,
-                "ver" to root.getAttribute("android:versionName"),
-                "vc" to (vcRaw.toLongOrNull() ?: vcRaw),
+                "ver" to root.getAttribute("android:versionName").ifEmpty { null },
+                "vc" to (vcRaw.toLongOrNull() ?: vcRaw.ifEmpty { null }),
                 "src" to src,
                 "trackers" to sigs.size,
             )
@@ -129,7 +130,7 @@ val trackerReportPatch = bytecodePatch(
 ) {
     dependsOn(trackerReportManifestPatch)
 
-    execute {
+    apply {
         val sigs = Report.sigs ?: TrackerList.load().first
         val perTracker = HashMap<String, Int>()
         val risky = HashMap<String, Int>()

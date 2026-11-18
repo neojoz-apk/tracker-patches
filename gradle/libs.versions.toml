@@ -1,5 +1,5 @@
 [versions]
-# 22.0.1 = the patcher that Universal ReVanced Manager 1.8.x ships (template had 21.0.0).
+# ReVanced Patcher 22 (published as app.revanced:patcher). Universal Patch Manager 2.x runs it via its "ReVanced v22" runtime plugin.
 revanced-patcher = "22.0.1"
 # Tracking https://github.com/google/smali/issues/64.
 #noinspection GradleDependency
