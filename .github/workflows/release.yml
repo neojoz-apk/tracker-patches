@@ -1,27 +1,22 @@
-name: Release
+name: Build and release
 
 on:
   workflow_dispatch:
   push:
     branches:
       - main
-      - dev
+
+permissions:
+  contents: write
+  packages: read
 
 jobs:
   release:
-    name: Release
-    permissions:
-      contents: write
-      packages: write
+    name: Build and release
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          # Make sure the release step uses its own credentials:
-          # https://github.com/cycjimmy/semantic-release-action#private-packages
-          persist-credentials: false
-          fetch-depth: 0
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -35,25 +30,21 @@ jobs:
       - name: Build
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: ./gradlew build clean
+        run: |
+          chmod +x gradlew
+          ./gradlew apiDump build
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "lts/*"
-          cache: 'npm'
+      - name: Check output
+        run: |
+          ls -la patches/build/libs
+          ls patches/build/libs/patches-*.rvp
 
-      - name: Install dependencies
-        run: npm install
-
-      - name: Import GPG key
-        uses: crazy-max/ghaction-import-gpg@v6
-        with:
-          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
-          passphrase: ${{ secrets.GPG_PASSPHRASE }}
-          fingerprint: ${{ vars.GPG_FINGERPRINT }}
-
-      - name: Release
+      - name: Create release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm exec semantic-release
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="v1.0.${{ github.run_number }}"
+          gh release create "$TAG" patches/build/libs/patches-*.rvp \
+            --title "$TAG" \
+            --notes "Automated build $TAG (commit ${GITHUB_SHA::7})" \
+            --target "$GITHUB_SHA"
