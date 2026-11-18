@@ -1,5 +1,6 @@
 [versions]
-revanced-patcher = "21.0.0"
+# 22.0.1 = the patcher that Universal ReVanced Manager 1.8.x ships (template had 21.0.0).
+revanced-patcher = "22.0.1"
 # Tracking https://github.com/google/smali/issues/64.
 #noinspection GradleDependency
 smali = "3.0.5"
