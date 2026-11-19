@@ -52,6 +52,12 @@ private val optOptOut = booleanOption(
     default = true,
     description = "Add documented SDK opt-out <meta-data> flags (Firebase, Facebook, Sentry).",
 )
+private val optTestOnly = booleanOption(
+    name = "Mark as test-only",
+    default = false,
+    description = "Set android:testOnly=\"true\" so single components can be switched on/off later through Shizuku " +
+        "(Blocker in Shizuku mode, or pm enable/disable). Install with UPM's Shizuku installer; normal installers refuse test-only apps.",
+)
 private val optStripAdPerms = booleanOption(
     name = "Remove advertising-ID permissions",
     default = true,
@@ -197,6 +203,7 @@ private val trackerManifestPatch = resourcePatch {
                 "custom" to customRx.size,
                 "rename" to !optNewPackage.value.isNullOrBlank(),
                 "label" to !optAppName.value.isNullOrBlank(),
+                "testonly" to (optTestOnly.value ?: false),
             )
 
             // --- permissions -------------------------------------------------------------------
@@ -286,6 +293,16 @@ private val trackerManifestPatch = resourcePatch {
 
             // --- clone: package rename + app name (after the tracker rules) --------------------
             Clone.manifest(this, root, pkg, reportOnly)
+
+            // --- test-only flag (lets the shell / Shizuku toggle single components) ------------
+            if ((optTestOnly.value ?: false) && app != null) {
+                if (app.getAttribute("android:testOnly") == "true") {
+                    Report.skip("android:testOnly", "already")
+                } else {
+                    Report.chg("test-only", "application", "android:testOnly=true", reportOnly)
+                    if (!reportOnly) app.setAttribute("android:testOnly", "true")
+                }
+            }
         }
         // res/ text pass, after the manifest document is written back
         Clone.resources(this, reportOnly)
@@ -320,6 +337,7 @@ val trackerPatch = bytecodePatch(
     optStripAdPerms()
     optNewPackage()
     optAppName()
+    optTestOnly()
 
     apply {
         val sigs = Report.sigs ?: TrackerList.load().first
