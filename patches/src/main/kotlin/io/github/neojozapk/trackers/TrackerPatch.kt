@@ -99,7 +99,7 @@ private val RISKY_SDKS = mapOf(
 )
 
 /** State shared between the manifest pass and the code pass of one patching run. */
-private object Report {
+internal object Report {
     var sigs: Signatures? = null
     val manifestTrackers = HashSet<String>()
     var comps = 0
@@ -195,6 +195,8 @@ private val trackerManifestPatch = resourcePatch {
                 "adperms" to stripAdPerms,
                 "keep" to keepRx.size,
                 "custom" to customRx.size,
+                "rename" to !optNewPackage.value.isNullOrBlank(),
+                "label" to !optAppName.value.isNullOrBlank(),
             )
 
             // --- permissions -------------------------------------------------------------------
@@ -210,77 +212,83 @@ private val trackerManifestPatch = resourcePatch {
                 }
             }
 
-            val app = root.childElements().firstOrNull { it.tagName == "application" } ?: return@use
+            val app = root.childElements().firstOrNull { it.tagName == "application" }
+            if (app != null) {
+                // --- components --------------------------------------------------------------------
+                for (el in app.childElements()) {
+                    if (el.tagName !in COMPONENT_TAGS) continue
+                    val name = resolve(el.getAttribute("android:name"), pkg) ?: ""
+                    val target = if (el.tagName == "activity-alias")
+                        resolve(el.getAttribute("android:targetActivity"), pkg) else null
+                    val tracker = sigs.match(name) ?: sigs.match(target)
+                    val wasEnabled = el.getAttribute("android:enabled") != "false"
+                    Report.comps++
+                    if (tracker != null) {
+                        Report.trackerComps++
+                        Report.manifestTrackers.add(tracker)
+                    }
+                    TprLog.emit("t" to "comp", "k" to el.tagName, "n" to name, "tr" to tracker, "en" to wasEnabled)
 
-            // --- components --------------------------------------------------------------------
-            for (el in app.childElements()) {
-                if (el.tagName !in COMPONENT_TAGS) continue
-                val name = resolve(el.getAttribute("android:name"), pkg) ?: ""
-                val target = if (el.tagName == "activity-alias")
-                    resolve(el.getAttribute("android:targetActivity"), pkg) else null
-                val tracker = sigs.match(name) ?: sigs.match(target)
-                val wasEnabled = el.getAttribute("android:enabled") != "false"
-                Report.comps++
-                if (tracker != null) {
-                    Report.trackerComps++
-                    Report.manifestTrackers.add(tracker)
-                }
-                TprLog.emit("t" to "comp", "k" to el.tagName, "n" to name, "tr" to tracker, "en" to wasEnabled)
+                    val isActivity = el.tagName == "activity" || el.tagName == "activity-alias"
+                    val custom = customRx.any { it.containsMatchIn(name) }
+                    when {
+                        // explicit request wins over the keep list and the activity rule
+                        custom -> disable(el, name, "custom", wasEnabled, reportOnly)
+                        tracker == null || !disableTrackers -> {}
+                        kept(name) -> Report.skip(name, "keep")
+                        isActivity && !includeActivities -> Report.skip(name, "activity")
+                        else -> disable(el, name, "tracker:$tracker", wasEnabled, reportOnly)
+                    }
 
-                val isActivity = el.tagName == "activity" || el.tagName == "activity-alias"
-                val custom = customRx.any { it.containsMatchIn(name) }
-                when {
-                    // explicit request wins over the keep list and the activity rule
-                    custom -> disable(el, name, "custom", wasEnabled, reportOnly)
-                    tracker == null || !disableTrackers -> {}
-                    kept(name) -> Report.skip(name, "keep")
-                    isActivity && !includeActivities -> Report.skip(name, "activity")
-                    else -> disable(el, name, "tracker:$tracker", wasEnabled, reportOnly)
-                }
-
-                // androidx.startup initialisers are <meta-data> inside InitializationProvider
-                if (el.tagName == "provider" && name == "androidx.startup.InitializationProvider") {
-                    for (md in el.childElements()) {
-                        if (md.tagName != "meta-data") continue
-                        val initName = md.getAttribute("android:name")
-                        val t = sigs.match(initName)
-                        if (t != null) Report.manifestTrackers.add(t)
-                        Report.inits++
-                        TprLog.emit("t" to "init", "n" to initName, "tr" to t)
-                        if (t == null || !removeInits) continue
-                        if (kept(initName)) {
-                            Report.skip(initName, "keep")
-                        } else {
-                            Report.chg("remove-init", initName, "tracker:$t", reportOnly)
-                            if (!reportOnly) removeWithIndent(el, md)
+                    // androidx.startup initialisers are <meta-data> inside InitializationProvider
+                    if (el.tagName == "provider" && name == "androidx.startup.InitializationProvider") {
+                        for (md in el.childElements()) {
+                            if (md.tagName != "meta-data") continue
+                            val initName = md.getAttribute("android:name")
+                            val t = sigs.match(initName)
+                            if (t != null) Report.manifestTrackers.add(t)
+                            Report.inits++
+                            TprLog.emit("t" to "init", "n" to initName, "tr" to t)
+                            if (t == null || !removeInits) continue
+                            if (kept(initName)) {
+                                Report.skip(initName, "keep")
+                            } else {
+                                Report.chg("remove-init", initName, "tracker:$t", reportOnly)
+                                if (!reportOnly) removeWithIndent(el, md)
+                            }
                         }
                     }
                 }
-            }
 
-            // --- opt-out flags -----------------------------------------------------------------
-            if (optOut) {
-                val existing = app.childElements()
-                    .filter { it.tagName == "meta-data" }
-                    .associateBy { it.getAttribute("android:name") }
-                for ((key, value) in OPTOUT_FLAGS) {
-                    val md = existing[key]
-                    val old = md?.getAttribute("android:value")?.ifEmpty { null }
-                    if (md != null && old == value) {
-                        Report.skip(key, "already")
-                        continue
+                // --- opt-out flags -----------------------------------------------------------------
+                if (optOut) {
+                    val existing = app.childElements()
+                        .filter { it.tagName == "meta-data" }
+                        .associateBy { it.getAttribute("android:name") }
+                    for ((key, value) in OPTOUT_FLAGS) {
+                        val md = existing[key]
+                        val old = md?.getAttribute("android:value")?.ifEmpty { null }
+                        if (md != null && old == value) {
+                            Report.skip(key, "already")
+                            continue
+                        }
+                        Report.chg("add-meta", key, if (old == null) "$key=$value" else "$key=$value (was $old)", reportOnly)
+                        if (reportOnly) continue
+                        val target = md ?: document.createElement("meta-data").also {
+                            it.setAttribute("android:name", key)
+                            app.appendChild(document.createTextNode("\n        "))
+                            app.appendChild(it)
+                        }
+                        target.setAttribute("android:value", value)
                     }
-                    Report.chg("add-meta", key, if (old == null) "$key=$value" else "$key=$value (was $old)", reportOnly)
-                    if (reportOnly) continue
-                    val target = md ?: document.createElement("meta-data").also {
-                        it.setAttribute("android:name", key)
-                        app.appendChild(document.createTextNode("\n        "))
-                        app.appendChild(it)
-                    }
-                    target.setAttribute("android:value", value)
                 }
-            }
+            } // app != null
+
+            // --- clone: package rename + app name (after the tracker rules) --------------------
+            Clone.manifest(this, root, pkg, reportOnly)
         }
+        // res/ text pass, after the manifest document is written back
+        Clone.resources(this, reportOnly)
     }
 }
 
@@ -298,7 +306,7 @@ private fun disable(el: Element, name: String, why: String, wasEnabled: Boolean,
 val trackerPatch = bytecodePatch(
     name = "Tracker patches",
     description = "Disables tracker components, startup initialisers, ad-ID permissions and sets opt-out flags. " +
-        "Logs every finding and change as TPR| lines.",
+        "Optionally clones the app under a new package name and app name. Logs every finding and change as TPR| lines.",
 ) {
     dependsOn(trackerManifestPatch)
 
@@ -310,6 +318,8 @@ val trackerPatch = bytecodePatch(
     optCustom()
     optOptOut()
     optStripAdPerms()
+    optNewPackage()
+    optAppName()
 
     apply {
         val sigs = Report.sigs ?: TrackerList.load().first
@@ -350,6 +360,11 @@ val trackerPatch = bytecodePatch(
             "warns" to risky.size,
             "chg" to Report.chg,
             "skip" to Report.skip,
+            "renames" to Clone.renames.size,
+            "refs" to Clone.refs,
+            "qualified" to Clone.qualified,
+            "resFiles" to Clone.resFiles,
+            "resStrings" to Clone.resStrings,
         )
     }
 }
