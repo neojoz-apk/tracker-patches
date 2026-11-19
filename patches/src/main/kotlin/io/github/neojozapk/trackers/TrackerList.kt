@@ -49,15 +49,29 @@ internal class Signatures(mapping: Map<String, List<String>>) {
 internal object TrackerList {
     private const val URL_EXODUS = "https://reports.exodus-privacy.eu.org/api/trackers"
 
-    /** Returns signatures and the source tag for the log: "exodus-live" or "snapshot". */
+    /**
+     * Returns signatures and the source tag for the log: "exodus-live" or "snapshot".
+     * The built-in list is always merged in: Exodus entries come first (their names win when
+     * several trackers match), and for a tracker present in both, the signatures are combined.
+     */
     fun load(): Pair<Signatures, String> {
         try {
             val live = parseExodus(download())
-            if (live.size >= 50) return Signatures(live) to "exodus-live"
+            if (live.size >= 50) return Signatures(merge(live, SNAPSHOT)) to "exodus-live"
         } catch (e: Exception) {
             // fall through to the snapshot
         }
         return Signatures(SNAPSHOT) to "snapshot"
+    }
+
+    internal fun merge(primary: Map<String, List<String>>, extra: Map<String, List<String>>): Map<String, List<String>> {
+        val out = LinkedHashMap<String, MutableList<String>>()
+        for ((name, sigs) in primary) out[name] = sigs.toMutableList()
+        for ((name, sigs) in extra) {
+            val list = out.getOrPut(name) { ArrayList() }
+            for (s in sigs) if (s !in list) list.add(s)
+        }
+        return out
     }
 
     private fun download(): String {
@@ -160,5 +174,14 @@ internal object TrackerList {
         "StartApp" to listOf("com.startapp."),
         "Pangle (ByteDance)" to listOf("com.bytedance.sdk.openadsdk."),
         "Mintegral" to listOf("com.mbridge.msdk."),
+        // Added after the mydealz test (Phase 0): SDKs the live Exodus list did not match.
+        "Moloco" to listOf("com.moloco.sdk."),
+        "Display.io" to listOf("com.brandio.ads."),
+        "Confiant" to listOf("com.confiant."),
+        "Iterable" to listOf("com.iterable.iterableapi."),
+        "Google Mobile Ads init" to listOf(
+            "com.google.android.gms.ads.MobileAdsInitProvider",
+            "com.google.android.gms.ads.AdService",
+        ),
     )
 }
